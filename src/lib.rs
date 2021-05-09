@@ -1,35 +1,55 @@
+#![no_std]
+
+use core::fmt::Write;
+
+pub type StrBuf<const CAP: usize> = arrayvec::ArrayString<CAP>;
+
 pub type ArgsIter<'a> = core::str::SplitWhitespace<'a>;
 
 #[derive(Debug)]
 pub enum Error {
+    CmdFailure,
+    BufferOverflow,
     CmdNotFound,
     EmptyCmd,
     NotEnoughArgs,
     InvalidArgType,
 }
 
-pub trait Cli<const CMD_N: usize> {
-    fn get_cmd_by_name(&self, name: &str) -> Option<&Cmd>;
-    fn get_cmds(&self) -> &[Cmd; CMD_N];
+impl From<arrayvec::CapacityError<&str>> for Error {
+    fn from(_item: arrayvec::CapacityError<&str>) -> Self {
+        Self::BufferOverflow
+    }
+}
 
-    fn help(&self, args: &mut ArgsIter) -> Result<String, Error> {
+impl From<core::fmt::Error> for Error {
+    fn from(_item: core::fmt::Error) -> Self {
+        Self::BufferOverflow
+    }
+}
+
+pub trait Cli<const CMD_N: usize, const BUF_CAP: usize> {
+    fn get_cmd_by_name(&self, name: &str) -> Option<&Cmd<BUF_CAP>>;
+    fn get_cmds(&self) -> &[Cmd<BUF_CAP>; CMD_N];
+
+    fn help(&self, args: &mut ArgsIter) -> Result<StrBuf<BUF_CAP>, Error> {
         match args.next() {
             Some(cmd_name) => match self.get_cmd_by_name(cmd_name) {
-                Some(cmd) => Ok(cmd.help.to_string()),
+                Some(cmd) => Ok(StrBuf::from(cmd.help)?),
                 None => Err(Error::CmdNotFound),
             },
             None => {
-                let mut help_str = "Available commands:\n".to_string();
+                let mut help_str = StrBuf::from("Available commands:\n")?;
                 for cmd in self.get_cmds().iter() {
-                    help_str.push_str(&format!("  {:10} {}\n", cmd.name, cmd.descr));
+                    write!(help_str, "  {:10} {}\n", cmd.name, cmd.descr)?;
                 }
-                help_str.push_str("Use 'help <command> to get more details.");
+                help_str.try_push_str("Use 'help <command> to get more details.")?;
                 Ok(help_str)
             }
         }
     }
 
-    fn exec(&self, raw_str: &str) -> Result<String, Error> {
+    fn exec(&self, raw_str: &str) -> Result<StrBuf<BUF_CAP>, Error> {
         // get command name and arguments from the input string
         let mut args = raw_str.split_whitespace();
         let cmd_name = match args.next() {
@@ -48,11 +68,11 @@ pub trait Cli<const CMD_N: usize> {
     }
 }
 
-pub struct Cmd {
+pub struct Cmd<const BUF_CAP: usize> {
     pub name: &'static str,
     pub descr: &'static str,
     pub help: &'static str,
-    pub callback: fn(&mut ArgsIter) -> Result<String, Error>,
+    pub callback: fn(&mut ArgsIter) -> Result<StrBuf<BUF_CAP>, Error>,
 }
 
 pub mod arg_utils {
@@ -66,7 +86,7 @@ pub mod arg_utils {
 
     pub fn int_from_str<T>(s: Option<&str>) -> Result<T, Error>
     where
-        T: num::Integer + num::Bounded + std::fmt::Display,
+        T: num::Integer + num::Bounded + core::fmt::Display,
     {
         let s = unwrap(s)?;
         let mut radix = 10;
@@ -86,7 +106,7 @@ pub mod arg_utils {
 
     pub fn float_from_str<T>(s: Option<&str>) -> Result<T, Error>
     where
-        T: num::Float + std::str::FromStr,
+        T: num::Float + core::str::FromStr,
     {
         let s = unwrap(s)?;
         match s.parse::<T>() {

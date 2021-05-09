@@ -1,8 +1,8 @@
-use amoeba_cli::{arg_utils, ArgsIter, Cmd, CLI};
+use amoeba_cli::{arg_utils, ArgsIter, Cli, Cmd, Error};
 use std::io;
 use std::io::Write; // for flush()
 
-fn cmd_led(args: &mut ArgsIter) -> Result<String, String> {
+fn cmd_led(args: &mut ArgsIter) -> Result<String, Error> {
     let state = arg_utils::bool_from_str(args.next())?;
     if state {
         Ok("Led is ON now".to_string())
@@ -11,29 +11,29 @@ fn cmd_led(args: &mut ArgsIter) -> Result<String, String> {
     }
 }
 
-fn cmd_rgb(args: &mut ArgsIter) -> Result<String, String> {
+fn cmd_rgb(args: &mut ArgsIter) -> Result<String, Error> {
     let r = arg_utils::int_from_str::<u8>(args.next())?;
     let g = arg_utils::int_from_str::<u8>(args.next())?;
     let b = arg_utils::int_from_str::<u8>(args.next())?;
     Ok(format!("Ok, R={}, G={}, B={}", r, g, b))
 }
 
-fn cmd_id(args: &mut ArgsIter) -> Result<String, String> {
+fn cmd_id(args: &mut ArgsIter) -> Result<String, Error> {
     let id = arg_utils::unwrap(args.next())?;
     Ok(format!("Ok, id='{}'", id))
 }
 
-fn cmd_exit(_args: &mut ArgsIter) -> Result<String, String> {
+fn cmd_exit(_args: &mut ArgsIter) -> Result<String, Error> {
     std::process::exit(0);
 }
 
-struct AppCLI<const CMD_N: usize> {
+struct AppCli<const CMD_N: usize> {
     greeting: &'static str,
     prompt: &'static str,
     cmds: [Cmd; CMD_N],
 }
 
-impl<const CMD_N: usize> CLI<CMD_N> for AppCLI<CMD_N> {
+impl<const CMD_N: usize> Cli<CMD_N> for AppCli<CMD_N> {
     fn get_cmd_by_name(&self, name: &str) -> Option<&Cmd> {
         self.cmds.iter().filter(|x| x.name == name).next()
     }
@@ -44,7 +44,7 @@ impl<const CMD_N: usize> CLI<CMD_N> for AppCLI<CMD_N> {
 
 fn main() {
     // construct comand-line interface with specific commands
-    let cli = AppCLI {
+    let cli = AppCli {
         greeting: "@@@@ amoeba-cli @@@@
 Type command and press 'Enter'. Use 'help' to list all available commands
 or 'help foobar' to get more details about specific command.
@@ -90,7 +90,12 @@ or 'help foobar' to get more details about specific command.
         // parse the input string and print the result
         match cli.parse(&raw_str) {
             Ok(msg) => println!("{}", msg),
-            Err(msg) => println!("{}", msg),
+            Err(etype) => match etype {
+                Error::CmdNotFound => eprintln!("command was not found!"),
+                Error::EmptyCmd => eprintln!("empty command!"),
+                Error::NotEnoughArgs => eprintln!("not enough arguments for the command!"),
+                Error::InvalidArgType => eprintln!("invalid argument type!"),
+            },
         }
     }
 }

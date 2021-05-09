@@ -1,14 +1,22 @@
- pub type ArgsIter<'a> = core::str::SplitWhitespace<'a>;
+pub type ArgsIter<'a> = core::str::SplitWhitespace<'a>;
 
-pub trait CLI<const CMD_N: usize> {
+#[derive(Debug)]
+pub enum Error {
+    CmdNotFound,
+    EmptyCmd,
+    NotEnoughArgs,
+    InvalidArgType,
+}
+
+pub trait Cli<const CMD_N: usize> {
     fn get_cmd_by_name(&self, name: &str) -> Option<&Cmd>;
     fn get_cmds(&self) -> &[Cmd; CMD_N];
 
-    fn help(&self, args: &mut ArgsIter) -> Result<String, String> {
+    fn help(&self, args: &mut ArgsIter) -> Result<String, Error> {
         match args.next() {
             Some(cmd_name) => match self.get_cmd_by_name(cmd_name) {
                 Some(cmd) => Ok(cmd.help.to_string()),
-                None => Err(format!("command '{}' was not found!", cmd_name)),
+                None => Err(Error::CmdNotFound),
             },
             None => {
                 let mut help_str = "Available commands:\n".to_string();
@@ -21,12 +29,12 @@ pub trait CLI<const CMD_N: usize> {
         }
     }
 
-    fn parse(&self, raw_str: &str) -> Result<String, String> {
+    fn parse(&self, raw_str: &str) -> Result<String, Error> {
         // get command name and arguments from the input string
         let mut args = raw_str.split_whitespace();
         let cmd_name = match args.next() {
             Some(name) => name,
-            None => return Err("Empty command name!".to_string()),
+            None => return Err(Error::EmptyCmd),
         };
         // execute selected command
         if cmd_name == "help" {
@@ -34,7 +42,7 @@ pub trait CLI<const CMD_N: usize> {
         } else {
             match self.get_cmd_by_name(cmd_name) {
                 Some(cmd) => (cmd.callback)(&mut args),
-                None => Err(format!("command '{}' was not found!", cmd_name)),
+                None => Err(Error::CmdNotFound),
             }
         }
     }
@@ -44,18 +52,19 @@ pub struct Cmd {
     pub name: &'static str,
     pub descr: &'static str,
     pub help: &'static str,
-    pub callback: Box<dyn Fn(&mut ArgsIter) -> Result<String, String>>,
+    pub callback: Box<dyn Fn(&mut ArgsIter) -> Result<String, Error>>,
 }
 
 pub mod arg_utils {
-    pub fn unwrap(s: Option<&str>) -> Result<&str, String> {
+    use super::Error;
+    pub fn unwrap(s: Option<&str>) -> Result<&str, Error> {
         match s {
             Some(val) => Ok(val),
-            None => Err("Not enough arguments".to_string()),
+            None => Err(Error::NotEnoughArgs),
         }
     }
 
-    pub fn int_from_str<T>(s: Option<&str>) -> Result<T, String>
+    pub fn int_from_str<T>(s: Option<&str>) -> Result<T, Error>
     where
         T: num::Integer + num::Bounded + std::fmt::Display,
     {
@@ -71,30 +80,22 @@ pub mod arg_utils {
         }
         match <T>::from_str_radix(s_clean, radix) {
             Ok(val) => Ok(val),
-            Err(_) => Err(format!(
-                "Not able to convert '{}' to {} integer!",
-                s,
-                std::any::type_name::<T>(),
-            )),
+            Err(_) => Err(Error::InvalidArgType),
         }
     }
 
-    pub fn float_from_str<T>(s: Option<&str>) -> Result<T, String>
+    pub fn float_from_str<T>(s: Option<&str>) -> Result<T, Error>
     where
         T: num::Float + std::str::FromStr,
     {
         let s = unwrap(s)?;
         match s.parse::<T>() {
             Ok(val) => Ok(val),
-            Err(_) => Err(format!(
-                "Not able to convert '{}' to {} float!",
-                s,
-                std::any::type_name::<T>()
-            )),
+            Err(_) => Err(Error::InvalidArgType),
         }
     }
 
-    pub fn bool_from_str(s: Option<&str>) -> Result<bool, String> {
+    pub fn bool_from_str(s: Option<&str>) -> Result<bool, Error> {
         let s = unwrap(s)?;
         let true_aliases = ["true", "yes", "on", "enable", "y", "1"];
         let false_aliases = ["false", "no", "off", "disable", "n", "0"];
@@ -103,7 +104,7 @@ pub mod arg_utils {
         } else if false_aliases.contains(&s) {
             Ok(false)
         } else {
-            Err(format!("Not able to convert '{}' to bool!", &s))
+            Err(Error::InvalidArgType)
         }
     }
 }

@@ -16,6 +16,23 @@ pub enum Error {
     InvalidArgType,
 }
 
+impl core::fmt::Display for Error {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Error::CmdFailure => "Command execution failed!",
+                Error::BufferOverflow => "String buffer overflow!",
+                Error::CmdNotFound => "Command was not found!",
+                Error::EmptyCmd => "Empty command!",
+                Error::NotEnoughArgs => "Not enough arguments for the command!",
+                Error::InvalidArgType => "Invalid argument type!",
+            }
+        )
+    }
+}
+
 impl From<arrayvec::CapacityError<&str>> for Error {
     fn from(_item: arrayvec::CapacityError<&str>) -> Self {
         Self::BufferOverflow

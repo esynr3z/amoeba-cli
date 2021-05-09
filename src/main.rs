@@ -103,14 +103,7 @@ fn main() {
         // parse the input string and print the result
         match CLI.exec(&raw_str) {
             Ok(msg) => println!("{}", msg),
-            Err(etype) => match etype {
-                CliErr::CmdFailure => eprintln!("command execution failed!"),
-                CliErr::BufferOverflow => eprintln!("string buffer overflow!"),
-                CliErr::CmdNotFound => eprintln!("command was not found!"),
-                CliErr::EmptyCmd => eprintln!("empty command!"),
-                CliErr::NotEnoughArgs => eprintln!("not enough arguments for the command!"),
-                CliErr::InvalidArgType => eprintln!("invalid argument type!"),
-            },
+            Err(err) => eprintln!("{}", err),
         }
     }
 }

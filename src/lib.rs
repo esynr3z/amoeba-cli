@@ -29,7 +29,7 @@ pub trait Cli<const CMD_N: usize> {
         }
     }
 
-    fn parse(&self, raw_str: &str) -> Result<String, Error> {
+    fn exec(&self, raw_str: &str) -> Result<String, Error> {
         // get command name and arguments from the input string
         let mut args = raw_str.split_whitespace();
         let cmd_name = match args.next() {
@@ -52,7 +52,7 @@ pub struct Cmd {
     pub name: &'static str,
     pub descr: &'static str,
     pub help: &'static str,
-    pub callback: Box<dyn Fn(&mut ArgsIter) -> Result<String, Error>>,
+    pub callback: fn(&mut ArgsIter) -> Result<String, Error>,
 }
 
 pub mod arg_utils {

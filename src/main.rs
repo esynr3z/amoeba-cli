@@ -42,53 +42,54 @@ impl<const CMD_N: usize> Cli<CMD_N> for AppCli<CMD_N> {
     }
 }
 
-fn main() {
-    // construct comand-line interface with specific commands
-    let cli = AppCli {
-        greeting: "@@@@ amoeba-cli @@@@
+const CLI: AppCli<4> = AppCli {
+    greeting: "@@@@ amoeba-cli @@@@
 Type command and press 'Enter'. Use 'help' to list all available commands
 or 'help foobar' to get more details about specific command.
 ",
-        prompt: "> ",
-        cmds: [
-            Cmd {
-                name: "led",
-                descr: "led control",
-                help: "Use 'led on' or 'led off' to control the state of the led.",
-                callback: Box::new(cmd_led),
-            },
-            Cmd {
-                name: "rgb",
-                descr: "RGB led control",
-                help:
-                    "rgb <red> <green> <blue>\nUse values from 0 to 255 to specify channel brightness.",
-                callback: Box::new(cmd_rgb),
-            },
-            Cmd {
-                name: "id",
-                descr: "set device id",
-                help: "id <val>\nID have to be a string value.",
-                callback: Box::new(cmd_id),
-            },
-            Cmd {
-                name: "exit",
-                descr: "exit CLI",
-                help: "Yep, no jokes, program will be terminated.",
-                callback: Box::new(cmd_exit),
-            },
-        ],
-    };
-    print!("{}", cli.greeting);
+    prompt: "> ",
+    cmds: [
+        Cmd {
+            name: "led",
+            descr: "led control",
+            help: "Use 'led on' or 'led off' to control the state of the led.",
+            callback: cmd_led,
+        },
+        Cmd {
+            name: "rgb",
+            descr: "RGB led control",
+            help:
+                "rgb <red> <green> <blue>\nUse values from 0 to 255 to specify channel brightness.",
+            callback: cmd_rgb,
+        },
+        Cmd {
+            name: "id",
+            descr: "set device id",
+            help: "id <val>\nID have to be a string value.",
+            callback: cmd_id,
+        },
+        Cmd {
+            name: "exit",
+            descr: "exit CLI",
+            help: "Yep, no jokes, program will be terminated.",
+            callback: cmd_exit,
+        },
+    ],
+};
+
+fn main() {
+    // construct comand-line interface with specific commands
+    print!("{}", CLI.greeting);
     // imitate new string arrive (e.g. from UART)
     loop {
         let mut raw_str = String::new();
-        print!("{}", cli.prompt);
+        print!("{}", CLI.prompt);
         io::stdout().flush().unwrap(); // to ensure the output is emitted immediately
         io::stdin()
             .read_line(&mut raw_str)
             .expect("Failed to read line");
         // parse the input string and print the result
-        match cli.parse(&raw_str) {
+        match CLI.exec(&raw_str) {
             Ok(msg) => println!("{}", msg),
             Err(etype) => match etype {
                 Error::CmdNotFound => eprintln!("command was not found!"),

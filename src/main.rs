@@ -1,109 +1,108 @@
-use amoeba_cli as acli;
-use amoeba_cli::Cli;
-use core::fmt::Write as core_fmt_Write;
-use std::io;
-use std::io::Write as std_io_Write; // for flush()
+use amoeba_cli::{utils, Error, Interpreter};
+use core::fmt::Write as _core_fmt_Write;
+use ncurses::{addstr, endwin, getch, initscr, nocbreak, raw, scrollok};
 
-const BUF_CAP: usize = 1024;
-type CliArgs<'a> = acli::ArgsIter<'a>;
-type CliCmd = acli::Cmd<BUF_CAP>;
-type CliErr = acli::Error;
-type CliBuf = acli::StrBuf<BUF_CAP>;
+const CMD_BUF_SIZE: usize = 1024;
+const LINE_BUF_SIZE: usize = 128;
+const CMD_N: usize = 4;
 
-fn cmd_led(args: &mut CliArgs) -> Result<CliBuf, CliErr> {
-    let state = acli::arg_utils::bool_from_str(args.next())?;
+type Cmd = amoeba_cli::Cmd<CMD_BUF_SIZE>;
+type CmdBuf = amoeba_cli::ArrayString<CMD_BUF_SIZE>;
+type LineBuf = amoeba_cli::ArrayString<LINE_BUF_SIZE>;
+
+fn cmd_led<'a>(args: &mut dyn Iterator<Item = &'a str>) -> Result<CmdBuf, Error> {
+    let state = utils::bool_from_str(args.next())?;
     if state {
-        Ok(CliBuf::from("Led is ON now")?)
+        Ok(CmdBuf::from("Led is ON now")?)
     } else {
-        Ok(CliBuf::from("Led is OFF now")?)
+        Ok(CmdBuf::from("Led is OFF now")?)
     }
 }
 
-fn cmd_rgb(args: &mut CliArgs) -> Result<CliBuf, CliErr> {
-    let r = acli::arg_utils::int_from_str::<u8>(args.next())?;
-    let g = acli::arg_utils::int_from_str::<u8>(args.next())?;
-    let b = acli::arg_utils::int_from_str::<u8>(args.next())?;
-    let mut res = CliBuf::new();
+fn cmd_rgb<'a>(args: &mut dyn Iterator<Item = &'a str>) -> Result<CmdBuf, Error> {
+    let r = utils::int_from_str::<u8>(args.next())?;
+    let g = utils::int_from_str::<u8>(args.next())?;
+    let b = utils::int_from_str::<u8>(args.next())?;
+    let mut res = CmdBuf::new();
     write!(res, "Ok, R={}, G={}, B={}", r, g, b)?;
     Ok(res)
 }
 
-fn cmd_id(args: &mut CliArgs) -> Result<CliBuf, CliErr> {
-    let id = acli::arg_utils::unwrap(args.next())?;
-    let mut res = CliBuf::new();
+fn cmd_id<'a>(args: &mut dyn Iterator<Item = &'a str>) -> Result<CmdBuf, Error> {
+    let id = utils::unwrap(args.next())?;
+    let mut res = CmdBuf::new();
     write!(res, "Ok, id='{}'", id)?;
     Ok(res)
 }
 
-fn cmd_exit(_args: &mut CliArgs) -> Result<CliBuf, CliErr> {
+fn cmd_exit<'a>(_args: &mut dyn Iterator<Item = &'a str>) -> Result<CmdBuf, Error> {
+    endwin();
     std::process::exit(0);
 }
 
-struct AppCli<const CMD_N: usize> {
-    greeting: &'static str,
-    prompt: &'static str,
-    cmds: [CliCmd; CMD_N],
+static CMDS: [Cmd; CMD_N] = [
+    Cmd {
+        name: "led",
+        descr: "led control",
+        help: "Use 'led on' or 'led off' to control the state of the led.",
+        callback: cmd_led,
+    },
+    Cmd {
+        name: "rgb",
+        descr: "RGB led control",
+        help: "rgb <red> <green> <blue>\nUse values from 0 to 255 to specify channel brightness.",
+        callback: cmd_rgb,
+    },
+    Cmd {
+        name: "id",
+        descr: "set device id",
+        help: "id <val>\nID have to be a string value.",
+        callback: cmd_id,
+    },
+    Cmd {
+        name: "exit",
+        descr: "exit CLI",
+        help: "Yep, no jokes, program will be terminated.",
+        callback: cmd_exit,
+    },
+];
+
+pub struct Cli {
+    pub line_buf: LineBuf,
+    pub cmds: &'static [Cmd],
 }
 
-impl<const CMD_N: usize> Cli<CMD_N, BUF_CAP> for AppCli<CMD_N> {
-    fn get_cmd_by_name(&self, name: &str) -> Option<&CliCmd> {
+impl Interpreter<CMD_BUF_SIZE, LINE_BUF_SIZE> for Cli {
+    fn cmd_from_name(&self, name: &str) -> Option<&Cmd> {
         self.cmds.iter().filter(|x| x.name == name).next()
     }
-    fn get_cmds(&self) -> &[CliCmd; CMD_N] {
-        &self.cmds
+    fn cmds_arr(&self) -> &[Cmd] {
+        self.cmds
+    }
+    fn line_buf_mut(&mut self) -> &mut LineBuf {
+        &mut self.line_buf
+    }
+    fn line_buf(&self) -> &LineBuf {
+        &self.line_buf
+    }
+    fn print(&self, s: &str) {
+        addstr(s);
     }
 }
 
-const CLI: AppCli<4> = AppCli {
-    greeting: "@@@@ amoeba-cli @@@@
-Type command and press 'Enter'. Use 'help' to list all available commands
-or 'help foobar' to get more details about specific command.
-",
-    prompt: "> ",
-    cmds: [
-        CliCmd {
-            name: "led",
-            descr: "led control",
-            help: "Use 'led on' or 'led off' to control the state of the led.",
-            callback: cmd_led,
-        },
-        CliCmd {
-            name: "rgb",
-            descr: "RGB led control",
-            help:
-                "rgb <red> <green> <blue>\nUse values from 0 to 255 to specify channel brightness.",
-            callback: cmd_rgb,
-        },
-        CliCmd {
-            name: "id",
-            descr: "set device id",
-            help: "id <val>\nID have to be a string value.",
-            callback: cmd_id,
-        },
-        CliCmd {
-            name: "exit",
-            descr: "exit CLI",
-            help: "Yep, no jokes, program will be terminated.",
-            callback: cmd_exit,
-        },
-    ],
-};
-
 fn main() {
-    // construct comand-line interface with specific commands
-    print!("{}", CLI.greeting);
-    // imitate new string arrive (e.g. from UART)
+    let mut cli = Cli {
+        line_buf: LineBuf::new(),
+        cmds: &CMDS,
+    };
+
+    let w = initscr();
+    scrollok(w, true);
+    nocbreak();
+    raw();
+    cli.greeting();
     loop {
-        let mut raw_str = String::new();
-        print!("{}", CLI.prompt);
-        io::stdout().flush().unwrap(); // to ensure the output is emitted immediately
-        io::stdin()
-            .read_line(&mut raw_str)
-            .expect("Failed to read line");
-        // parse the input string and print the result
-        match CLI.exec(&raw_str) {
-            Ok(msg) => println!("{}", msg),
-            Err(err) => eprintln!("{}", err),
-        }
+        let ch = getch().to_be_bytes()[3] as char;
+        cli.put_char(ch);
     }
 }

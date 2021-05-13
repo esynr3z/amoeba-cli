@@ -9,3 +9,4 @@ edition = "2018"
 [dependencies]
 num = "0.4.0"
 arrayvec = "0.7.0"
+ncurses = "5.101.0"

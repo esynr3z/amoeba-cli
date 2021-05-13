@@ -1,12 +1,9 @@
 #![no_std]
 
+pub use arrayvec::ArrayString;
 use core::fmt::Write;
 
-pub type StrBuf<const CAP: usize> = arrayvec::ArrayString<CAP>;
-
-pub type ArgsIter<'a> = core::str::SplitWhitespace<'a>;
-
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum Error {
     CmdFailure,
     BufferOverflow,
@@ -16,25 +13,21 @@ pub enum Error {
     InvalidArgType,
 }
 
-impl core::fmt::Display for Error {
-    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
-        write!(
-            f,
-            "{}",
-            match self {
-                Error::CmdFailure => "Command execution failed!",
-                Error::BufferOverflow => "String buffer overflow!",
-                Error::CmdNotFound => "Command was not found!",
-                Error::EmptyCmd => "Empty command!",
-                Error::NotEnoughArgs => "Not enough arguments for the command!",
-                Error::InvalidArgType => "Invalid argument type!",
-            }
-        )
+impl Error {
+    fn to_str(&self) -> &'static str {
+        match self {
+            Error::CmdFailure => "Command execution failed!",
+            Error::BufferOverflow => "String buffer overflow!",
+            Error::CmdNotFound => "Command was not found!",
+            Error::EmptyCmd => "Empty command!",
+            Error::NotEnoughArgs => "Not enough arguments for the command!",
+            Error::InvalidArgType => "Invalid argument type!",
+        }
     }
 }
 
-impl From<arrayvec::CapacityError<&str>> for Error {
-    fn from(_item: arrayvec::CapacityError<&str>) -> Self {
+impl<T> From<arrayvec::CapacityError<T>> for Error {
+    fn from(_item: arrayvec::CapacityError<T>) -> Self {
         Self::BufferOverflow
     }
 }
@@ -45,19 +38,54 @@ impl From<core::fmt::Error> for Error {
     }
 }
 
-pub trait Cli<const CMD_N: usize, const BUF_CAP: usize> {
-    fn get_cmd_by_name(&self, name: &str) -> Option<&Cmd<BUF_CAP>>;
-    fn get_cmds(&self) -> &[Cmd<BUF_CAP>; CMD_N];
+pub trait Interpreter<const CMD_BUF_SIZE: usize, const LINE_BUF_SIZE: usize> {
+    const GREETING: &'static str = "@@@@ amoeba-cli @@@@
+Type command and press 'Enter'. Use 'help' to list all available commands
+or 'help foobar' to get more details about specific command.
+";
+    const PROMPT: &'static str = "> ";
 
-    fn help(&self, args: &mut ArgsIter) -> Result<StrBuf<BUF_CAP>, Error> {
+    fn cmd_from_name(&self, name: &str) -> Option<&Cmd<CMD_BUF_SIZE>>;
+    fn cmds_arr(&self) -> &[Cmd<CMD_BUF_SIZE>];
+    fn line_buf_mut(&mut self) -> &mut ArrayString<LINE_BUF_SIZE>;
+    fn line_buf(&self) -> &ArrayString<LINE_BUF_SIZE>;
+    fn print(&self, s: &str);
+
+    fn greeting(&self) {
+        self.print_lines(Self::GREETING.lines()).unwrap();
+        self.print(Self::PROMPT);
+    }
+
+    fn print_line(&self, line: &str) -> Result<(), Error> {
+        let mut line_buf = ArrayString::<LINE_BUF_SIZE>::from(line)?;
+        line_buf.try_push_str("\n")?;
+        self.print(&line_buf);
+        Ok(())
+    }
+
+    fn print_lines<'a, I>(&self, lines: I) -> Result<(), Error>
+    where
+        I: Iterator<Item = &'a str>,
+    {
+        for line in lines {
+            self.print_line(&line)?;
+        }
+        Ok(())
+    }
+
+    fn help<'a>(&self, args: &mut dyn Iterator<Item = &'a str>) -> Result<ArrayString<CMD_BUF_SIZE>, Error> {
+        let mut help_str = ArrayString::<CMD_BUF_SIZE>::new();
         match args.next() {
-            Some(cmd_name) => match self.get_cmd_by_name(cmd_name) {
-                Some(cmd) => Ok(StrBuf::from(cmd.help)?),
+            Some(name) => match self.cmd_from_name(name) {
+                Some(cmd) => {
+                    help_str.try_push_str(cmd.help)?;
+                    Ok(help_str)
+                }
                 None => Err(Error::CmdNotFound),
             },
             None => {
-                let mut help_str = StrBuf::from("Available commands:\n")?;
-                for cmd in self.get_cmds().iter() {
+                help_str.try_push_str("Available commands:\n")?;
+                for cmd in self.cmds_arr().iter() {
                     write!(help_str, "  {:10} {}\n", cmd.name, cmd.descr)?;
                 }
                 help_str.try_push_str("Use 'help <command> to get more details.")?;
@@ -66,33 +94,47 @@ pub trait Cli<const CMD_N: usize, const BUF_CAP: usize> {
         }
     }
 
-    fn exec(&self, raw_str: &str) -> Result<StrBuf<BUF_CAP>, Error> {
+    fn put_char(&mut self, ch: char) {
+        match ch {
+            // if endline symbol received - time to execute the command
+            '\n' => {
+                if let Err(e) = self.exec(self.line_buf().as_str()) {
+                    self.print_line(e.to_str()).unwrap();
+                }
+                self.print(Self::PROMPT);
+                self.line_buf_mut().clear();
+            }
+            // try to push any other char to buffer and ignore buffer overflow
+            _ => self.line_buf_mut().try_push(ch).unwrap_or_else(|_e| ()),
+        };
+    }
+
+    fn exec(&self, cmd_line: &str) -> Result<(), Error> {
         // get command name and arguments from the input string
-        let mut args = raw_str.split_whitespace();
+        let mut args = cmd_line.split_whitespace();
         let cmd_name = match args.next() {
             Some(name) => name,
             None => return Err(Error::EmptyCmd),
         };
         // execute selected command
         if cmd_name == "help" {
-            self.help(&mut args)
+            Ok(self.print_lines(self.help(&mut args)?.lines())?)
+        } else if let Some(cmd) = self.cmd_from_name(cmd_name) {
+            Ok(self.print_lines((cmd.callback)(&mut args)?.lines())?)
         } else {
-            match self.get_cmd_by_name(cmd_name) {
-                Some(cmd) => (cmd.callback)(&mut args),
-                None => Err(Error::CmdNotFound),
-            }
+            Err(Error::CmdNotFound)
         }
     }
 }
 
-pub struct Cmd<const BUF_CAP: usize> {
+pub struct Cmd<const BUF_SIZE: usize> {
     pub name: &'static str,
     pub descr: &'static str,
     pub help: &'static str,
-    pub callback: fn(&mut ArgsIter) -> Result<StrBuf<BUF_CAP>, Error>,
+    pub callback: for<'a> fn(&mut dyn Iterator<Item = &'a str>) -> Result<ArrayString<BUF_SIZE>, Error>,
 }
 
-pub mod arg_utils {
+pub mod utils {
     use super::Error;
     pub fn unwrap(s: Option<&str>) -> Result<&str, Error> {
         match s {
